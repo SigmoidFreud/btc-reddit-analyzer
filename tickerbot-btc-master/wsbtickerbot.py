@@ -48,50 +48,6 @@ def extract_ticker(body, start_index):
     return ticker.upper()
 
 
-def parse_section(ticker_dict, body, existing_tickers, ticker_df):
-    """ Parses the body of each comment/reply """
-    ticker_prefixes = ['#', '$']
-    for prefix in ticker_prefixes:
-        if prefix in body:
-            index = body.find('prefix') + 1
-            word = extract_ticker(body, index)
-
-            if word and (
-                    word.upper() not in stopwords.blacklist_words and word.lower() not in stopwords.blacklist_words):
-                try:
-                    if word in existing_tickers:
-                        if 'btc' in ticker_dict:
-                            ticker_dict['btc'].count += 1
-                            ticker_dict['btc'].bodies.append(body)
-                        else:
-                            ticker_dict['btc'] = Ticker(word)
-                            ticker_dict['btc'].count = 1
-                            ticker_dict['btc'].bodies.append(body)
-                            # print(word, ticker_dict[word_upper].count)
-                except:
-                    pass
-
-    # checks for non-$ formatted comments, splits every body into list of words
-    word_list = re.sub("[^\w]", " ", body).split()
-    num_cores = multiprocessing.cpu_count()
-
-    for count, word in enumerate(word_list):
-        try:
-            if word in existing_tickers:
-                if 'btc' in ticker_dict:
-                    ticker_dict['btc'].count += 1
-                    ticker_dict['btc'].bodies.append(body)
-                else:
-                    ticker_dict['btc'] = Ticker(word)
-                    ticker_dict['btc'].count = 1
-                    ticker_dict['btc'].bodies.append(body)
-                    # print(word, ticker_dict[word_upper].count)
-        except:
-            pass
-
-    return ticker_dict
-
-
 def get_date():
     now = datetime.datetime.now()
     return now.strftime("%b %d, %Y")
@@ -136,7 +92,7 @@ def current_or_last_business_day_btc():
     return today
 
 
-def run(sub, num_submissions, existing_tickers, ticker_df):
+def run(sub, num_submissions, buy_signals, sell_signals, hold_signals):
     # print(get_iex_symbols()[:2])
     # exit(0)
     ticker_dict = {}
@@ -152,10 +108,10 @@ def run(sub, num_submissions, existing_tickers, ticker_df):
     today_date_string = convert_to_datestring(current_or_last_business_day_btc())
 
     today = datetime.now()
-    print(today_date_string, today.hour, today.weekday())
+    # print(today_date_string, today.hour, today.weekday())
     for submission in subreddit.search("Daily Discussion,", limit=20):
         # print(submission.title)
-        print(submission.title)
+        # print(submission.title)
         for datestring in today_date_string:
             if datestring in submission.title:
                 discussion_submissions.append(submission)
@@ -176,8 +132,10 @@ def run(sub, num_submissions, existing_tickers, ticker_df):
             count += 1
             # print(top_level_comment.body)
             # print('comment', comment.body)
-            ticker_dict = parse_section(ticker_dict, top_level_comment.body, existing_tickers, ticker_df)
-
+            buy, sell, hold = analyze_sentiment(top_level_comment.body, buy_signals, sell_signals, hold_signals)
+            buy_signals += buy
+            sell_signals += sell
+            hold_signals += hold
             # if len(ticker_dict):
             #     print(ticker_dict)
             # generate_sentiment_report(ticker_dict)
@@ -188,78 +146,47 @@ def run(sub, num_submissions, existing_tickers, ticker_df):
 
             if count == num_submissions:
                 break
-            generate_sentiment_report(wsb_ticker_dict)
+            generate_sentiment_report(buy_signals, sell_signals, hold_signals)
     # ticker_df.to_csv('existing_tickers.csv', mode='w+')
-    return ticker_dict
+    return buy_signals, sell_signals, hold_signals
     # ticker_df.to_csv('existing_tickers.csv.csv')
 
 
-def generate_sentiment_report(ticker_dictionary):
-    text = "\n\nTicker | Mentions | Bullish (%) | Neutral (%) | Bearish (%)"
+def generate_sentiment_report(buy_signals, sell_signals, hold_signals):
+    text = "\n\nTicker | Buy Signals (%) | Hold Signals (%) | Sell Signals (%)"
 
-    ticker_list = []
-    # print(ticker_dictionary)
-    for key in ticker_dictionary:
-        temp_count = ticker_dictionary[key].count
-        ticker_dictionary[key].count = temp_count
-        ticker_list.append(ticker_dictionary[key])
-    if not len(ticker_list):
-        return
-    ticker_list = sorted(ticker_list, key=operator.attrgetter("count"), reverse=True)
-    # print(ticker_list)
-    for ticker in ticker_list:
-        Ticker.analyze_sentiment(ticker)
+    total_signals = buy_signals + sell_signals + hold_signals
+    # url = get_url(ticker.ticker, ticker.count, total_mentions)
+    # setting up formatting for table
+    text += "\n{} | {} | {} | {}".format('btc',
+                                         str(buy_signals),
+                                         str(sell_signals),
+                                         str(hold_signals))
 
-    # will break as soon as it hits a ticker with fewer than 5 mentions
-    for count, ticker in enumerate(ticker_list):
-        # if ticker_dictionary[ticker.ticker].count < 3:
-        #     continue
-        if count == 6:
-            break
-
-        # url = get_url(ticker.ticker, ticker.count, total_mentions)
-        # setting up formatting for table
-        text += "\n{} | {} | {} | {} | {}".format(ticker.ticker, ticker_dictionary[ticker.ticker].count, ticker.bullish,
-                                                  ticker.bearish,
-                                                  ticker.neutral)
     print(text)
 
 
-class Ticker:
-    def __init__(self, ticker):
-        self.ticker = ticker
-        self.count = 0
-        self.bodies = []
-        self.pos_count = 0
-        self.neg_count = 0
-        self.bullish = 0
-        self.bearish = 0
-        self.neutral = 0
-        self.sentiment = 0  # 0 is neutral
+def analyze_sentiment(text, buy_signals, sell_signals, hold_signals):
+    buy_triggers = ["MOON", "BUY", "BOUGHT", "PUMP", "ELON", 'MUSK', "LOAD"]
+    hold_triggers = ["HOLD", "HODL"]
+    sell_triggers = ["DUMP", "SELL"]
 
-    def analyze_sentiment(self):
-        analyzer = SentimentIntensityAnalyzer()
-        neutral_count = 0
-        buy_triggers = ["MOON", "BUY", "HOLD", "HODL", "BOUGHT", "PUMP"]
-        sell_triggers = ["DUMP", "SELL"]
-        for text in self.bodies:
-            sentiment = analyzer.polarity_scores(text)
-            for trigger in buy_triggers:
-                if trigger in text or trigger.lower() in text:
-                    self.pos_count += 1
-            for trigger in sell_triggers:
-                if trigger in text or trigger.lower() in text:
-                    self.neg_count += 1
-            if (sentiment["compound"] > .005) or (sentiment["pos"] > abs(sentiment["neg"])):
-                self.pos_count += 1
-            elif (sentiment["compound"] < -.005) or (abs(sentiment["neg"]) > sentiment["pos"]):
-                self.neg_count += 1
-            else:
-                neutral_count += 1
+    ws_split = [word.lower() for word in text.split()]
+    print(ws_split)
+    for trigger in buy_triggers:
+        for word in ws_split:
+            if trigger.lower() in word:
+                buy_signals += 1
 
-        self.bullish = int(self.pos_count / len(self.bodies) * 100)
-        self.bearish = int(self.neg_count / len(self.bodies) * 100)
-        self.neutral = int(neutral_count / len(self.bodies) * 100)
+    for trigger in sell_triggers:
+        for word in ws_split:
+            if trigger.lower() in word:
+                sell_signals += 1
+    for trigger in hold_triggers:
+        for word in ws_split:
+            if trigger.lower() in word:
+                hold_signals += 1
+    return buy_signals, sell_signals, hold_signals
 
 
 if __name__ == "__main__":
@@ -269,6 +196,9 @@ if __name__ == "__main__":
     crypto_ticker_dict = defaultdict(list)
     crypto_ticker_dict['btc'].append('btc')
     crypto_ticker_dict['btc'].append('bitcoin')
+    buy_signal_count = 0
+    sell_signal_count = 0
+    hold_signal_count = 0
     while True:
         num_submissions = 10
         sub = "bitcoin"
@@ -276,18 +206,11 @@ if __name__ == "__main__":
         ticker_df_csv = pandas.read_csv("existing_tickers.csv")
         existing_ticker_data = crypto_ticker_dict['btc']
         # try:
-        wsb_tick_data = run(sub, num_submissions, existing_ticker_data, ticker_df_csv)
+        buy_signals, sell_signals, hold_signals = run(sub, num_submissions, 0, 0, 0)
+        buy_signal_count += buy_signals
+        sell_signal_count += sell_signals
+        hold_signals += hold_signals
         # except Exception:
         #     continue
-        print(wsb_tick_data)
-        for ticker, tick_obj in deepcopy(wsb_tick_data).items():
-            if ticker not in wsb_ticker_dict:
-                wsb_ticker_dict[ticker] = tick_obj
-            else:
-                attrs = vars(tick_obj)
-                for attr in attrs:
-                    if attr != 'ticker':
-                        vars(wsb_ticker_dict[ticker])[attr] += vars(tick_obj)[attr]
 
-        generate_sentiment_report(wsb_ticker_dict)
-        print(wsb_ticker_dict)
+        generate_sentiment_report(buy_signal_count, sell_signal_count, hold_signal_count)
