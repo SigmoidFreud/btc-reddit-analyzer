@@ -87,12 +87,12 @@ def convert_to_datestring(date):
 def current_or_last_business_day_btc():
     today = datetime.today()
     weekno = today.weekday()
-    if today.hour <= 4:
+    if today.hour < 5:
         return today - timedelta(days=1)
     return today
 
 
-def run(sub, num_submissions, buy_signals, sell_signals, hold_signals):
+def run(sub, num_submissions, buy_sig, sell_sig, hold_sig):
     # print(get_iex_symbols()[:2])
     # exit(0)
     ticker_dict = {}
@@ -132,10 +132,10 @@ def run(sub, num_submissions, buy_signals, sell_signals, hold_signals):
             count += 1
             # print(top_level_comment.body)
             # print('comment', comment.body)
-            buy, sell, hold = analyze_sentiment(top_level_comment.body, buy_signals, sell_signals, hold_signals)
-            buy_signals += buy
-            sell_signals += sell
-            hold_signals += hold
+            buy, sell, hold = analyze_sentiment(top_level_comment.body, 0, 0, 0)
+            buy_sig += buy
+            sell_sig += sell
+            hold_sig += hold
             # if len(ticker_dict):
             #     print(ticker_dict)
             # generate_sentiment_report(ticker_dict)
@@ -146,22 +146,22 @@ def run(sub, num_submissions, buy_signals, sell_signals, hold_signals):
 
             if count == num_submissions:
                 break
-            generate_sentiment_report(buy_signals, sell_signals, hold_signals)
+    # generate_sentiment_report(buy_sig, sell_sig, hold_sig)
     # ticker_df.to_csv('existing_tickers.csv', mode='w+')
-    return buy_signals, sell_signals, hold_signals
+    return buy_sig, sell_sig, hold_sig
     # ticker_df.to_csv('existing_tickers.csv.csv')
 
 
-def generate_sentiment_report(buy_signals, sell_signals, hold_signals):
+def generate_sentiment_report(buy_sig, sell_sig, hold_sig):
     text = "\n\nTicker | Buy Signals (%) | Hold Signals (%) | Sell Signals (%)"
 
-    total_signals = buy_signals + sell_signals + hold_signals
+    total_signals = buy_sig + sell_sig + hold_sig
     # url = get_url(ticker.ticker, ticker.count, total_mentions)
     # setting up formatting for table
     text += "\n{} | {} | {} | {}".format('btc',
-                                         str(buy_signals),
-                                         str(sell_signals),
-                                         str(hold_signals))
+                                         str(buy_sig),
+                                         str(sell_sig),
+                                         str(hold_sig))
 
     print(text)
 
@@ -200,13 +200,14 @@ if __name__ == "__main__":
     sell_signal_count = 0
     hold_signal_count = 0
     while True:
-        num_submissions = 10
+        num_submissions = 1000
         sub = "bitcoin"
         # os.environ["IEX_TOKEN"] = "pk_c9d60275d7934039a4e73d2bceafca71"
         ticker_df_csv = pandas.read_csv("existing_tickers.csv")
         existing_ticker_data = crypto_ticker_dict['btc']
         # try:
         buy_signals, sell_signals, hold_signals = run(sub, num_submissions, 0, 0, 0)
+        print(buy_signals, sell_signals, hold_signals)
         buy_signal_count += buy_signals
         sell_signal_count += sell_signals
         hold_signals += hold_signals
